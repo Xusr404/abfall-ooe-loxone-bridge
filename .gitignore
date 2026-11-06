@@ -1,0 +1,40 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local Docker settings may contain an API key.
+.env
+
+# Local browser capture artifacts (published screenshots live in docs/images/).
+/.playwright-cli/
+/output/
+
+# Generated runtime and address snapshot data
+/bridge/data/
+/tools/helpers/data/
+
+# Machine-local code index
+/.codegraph/
+/REPO_FILE_INVENTORY.csv
+
+# Local environment variants and service settings
+.env.*
+!.env.example
+/bridge/bridge.env
+
+# Loose local exports, diagnostics, and private keys (keep synthetic fixtures).
+/*.xml
+*.log
+*.tmp
+*.pem
+*.key
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db

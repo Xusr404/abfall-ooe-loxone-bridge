@@ -1,0 +1,17 @@
+services:
+  abfall-ooe:
+    image: ${ABFALL_OOE_IMAGE:?Set ABFALL_OOE_IMAGE in .env}
+    container_name: abfall-ooe
+    restart: unless-stopped
+    ports:
+      - "${LOXONE_BRIDGE_PORT:-8765}:8765"
+    environment:
+      LOXONE_BRIDGE_API_KEY: ${LOXONE_BRIDGE_API_KEY:-}
+      TZ: Europe/Vienna
+    volumes:
+      - bridge-data:/app/bridge/data
+      - address-data:/app/tools/helpers/data
+
+volumes:
+  bridge-data:
+  address-data:

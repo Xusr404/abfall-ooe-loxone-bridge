@@ -1,0 +1,97 @@
+name: Publish Docker image
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag, e.g. v1.0.0 or v1.0.0-rc.1
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      image: ${{ steps.version.outputs.image }}
+      commit: ${{ steps.version.outputs.commit }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+      - id: version
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          OWNER: ${{ github.repository_owner }}
+        run: python tools/release_version.py
+  validate:
+    needs: version
+    uses: ./.github/workflows/tests.yml
+    with:
+      ref: ${{ needs.version.outputs.commit }}
+  candidate:
+    needs: [version, validate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.version.outputs.commit }}
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Build candidate locally
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: linux/${{ matrix.arch }}
+          load: true
+          tags: abfall-ooe:candidate
+      - name: Smoke test candidate with synthetic data
+        run: python tools/container_smoke.py abfall-ooe:candidate
+      - name: Export tested candidate
+        run: docker save abfall-ooe:candidate -o candidate.tar
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: candidate-${{ matrix.arch }}
+          path: candidate.tar
+          retention-days: 1
+  publish:
+    needs: [version, candidate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: candidate-*
+          path: candidates
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish tested images and manifest
+        env:
+          IMAGE: ${{ needs.version.outputs.image }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          for arch in amd64 arm64; do
+            docker load -i "candidates/candidate-$arch/candidate.tar"
+            docker tag abfall-ooe:candidate "$IMAGE:$TAG-$arch"
+            docker push "$IMAGE:$TAG-$arch"
+          done
+          docker buildx imagetools create -t "$IMAGE:$TAG" "$IMAGE:$TAG-amd64" "$IMAGE:$TAG-arm64"
+          if [[ "$TAG" != *-* ]]; then
+            docker buildx imagetools create -t "$IMAGE:latest" "$IMAGE:$TAG-amd64" "$IMAGE:$TAG-arm64"
+          fi
